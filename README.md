@@ -147,6 +147,24 @@ Additional models can be implemented e.g., XGBoost, Prophet.
 
 ---
 
+<div>
+<img src="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks1.png" width="500px"</img>
+</div>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks1.png">
+</picture>
+
+<div>
+<img src="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks2.png" width="500px"</img>
+</div>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks2.png">
+</picture>
+
+---
+
 ## **Support**
 For issues or suggestions, contact:
 **Developer**: Atanas Youdanov  
