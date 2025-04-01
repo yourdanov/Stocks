@@ -1,0 +1,14 @@
+# Core Dependencies
+numpy==1.26
+pandas
+yfinance
+matplotlib
+mplcursors
+tensorflow
+tensorflow-intel
+tensorflow-keras
+statsmodels
+pmdarima
+scikit-learn
+seaborn
+nltk

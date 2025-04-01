@@ -12,6 +12,8 @@ import tensorflow.keras.backend as K # type: ignore
 import matplotlib.dates
 import mplcursors
 import nltk
+import time
+import warnings
 from datetime import datetime
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -25,23 +27,33 @@ from tensorflow.keras.callbacks import EarlyStopping # type: ignore
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.tsa.stattools import adfuller
 from pmdarima import auto_arima
-from datetime import datetime
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
+
+# Suppress warnings
+warnings.simplefilter("ignore", FutureWarning)
+warnings.simplefilter("ignore", RuntimeWarning)
+warnings.simplefilter("ignore", ConvergenceWarning)
 
 nltk.download("vader_lexicon", quiet=True)  # Suppress download message
-
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # === 1. Fetch historical stocks data ===
-def fetch_stock_data(stock_symbol, start_date, end_date):
-    try:
-        stock_data = yf.download(stock_symbol, start=start_date, end=end_date)
-        stock_data.index = pd.to_datetime(stock_data.index, errors='coerce')  # Ensure datetime format for the index
-        stock_data = stock_data['Close'].asfreq('ME', method='pad')  # Use month-end frequency
-        stock_data.name = "Price"  # Name the series for clarity
-        return stock_data
-    except Exception as e:
-        print(f"Error fetching stock data: {e}")
-        return pd.Series(dtype=float)
-
+def fetch_stock_data(symbol, start_date, end_date, retries=3, delay=2):
+    for i in range(retries):
+        try:
+            df = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            if not df.empty:
+                df.index = pd.to_datetime(df.index)
+                df = df['Close'].asfreq('ME', method='pad')
+                df.name = "Price"
+                return df
+            else:
+                print(f"[{i+1}] No data fetched. Retrying after {delay} seconds...")
+        except Exception as e:
+            print(f"[{i+1}] Fetch error: {e}")
+        time.sleep(delay)
+    print("Data fetch failed after retries.")
+    return pd.Series(dtype=float)
 
 # === 2. Forecast with ARIMA (AutoRegressive Integrated Moving Average) ===
 def forecast_arima(stock_data, steps=12):
@@ -78,7 +90,7 @@ def forecast_arima(stock_data, steps=12):
 
         # Reverse differencing to get actual forecast
         last_value = stock_data.iloc[-1]
-        forecast = [float(last_value) + sum(forecast_diff[:i+1]) for i in range(len(forecast_diff))]
+        forecast = [last_value.iloc[0] + sum(forecast_diff[:i+1]) for i in range(len(forecast_diff))]
 
         # Create date index
         future_dates = pd.date_range(start=datetime.now(), periods=steps, freq="ME")
@@ -96,25 +108,37 @@ def forecast_arima(stock_data, steps=12):
         )
 
 
-# === 3. Forecast with ETS (Exponential Smoothing) ===
+# === Forecast with ETS (Exponential Smoothing) ===
+# === Forecast with ETS (Exponential Smoothing) ===
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+import numpy as np
 
 def forecast_ets(stock_data, steps=12):
     try:
-        # Initialize variables to store the best model
-        best_model = None
-        best_aic = float('inf')
-        best_params = None
+        # Validate input
+        if stock_data.empty or len(stock_data.dropna()) < 3:
+            print("❌ Not enough data for ETS. Returning fallback values.")
+            return pd.Series(
+                [0] * steps,
+                index=pd.date_range(start=datetime.now(), periods=steps, freq="ME")
+            )
 
-        # Possible configurations for trend and seasonality
+        # Ensure values are scalar floats for comparison
+        min_val, max_val = float(stock_data.min()), float(stock_data.max())
+        apply_log = (min_val > 0) and ((max_val / min_val) > 1e6)
+
+        if apply_log:
+            stock_data = np.log(stock_data + 1)
+
+        best_model, best_aic, best_params = None, float("inf"), None
         configs = [
             {"trend": "add", "seasonal": "add"},
-            {"trend": "mul", "seasonal": "mul"},
             {"trend": "add", "seasonal": "mul"},
-            {"trend": "mul", "seasonal": "add"}
+            {"trend": "mul", "seasonal": "add"},
+            {"trend": "mul", "seasonal": "mul"},
+            {"trend": None, "seasonal": None}
         ]
 
-        # Grid search over trend and seasonal configurations
         for config in configs:
             try:
                 model = ExponentialSmoothing(
@@ -122,38 +146,32 @@ def forecast_ets(stock_data, steps=12):
                     seasonal=config["seasonal"],
                     seasonal_periods=12,
                     trend=config["trend"],
-                    initialization_method="estimated"  # Use robust initialization
+                    initialization_method="estimated"
                 )
-                model_fit = model.fit()
-                aic = model_fit.aic  # Akaike Information Criterion for model selection
-
+                model_fit = model.fit(optimized=True, use_brute=True)
+                aic = model_fit.aic
                 if aic < best_aic:
-                    best_aic = aic
-                    best_model = model_fit
-                    best_params = config
-
+                    best_model, best_aic, best_params = model_fit, aic, config
             except Exception as e:
-                print(f"Error with ETS config {config}: {e}")
+                print(f"⚠️ Skipping config {config} due to error: {e}")
 
-        # Forecast using the best model
         if best_model:
             forecast = best_model.forecast(steps)
-            forecast.index = pd.date_range(start=datetime.now(), periods=steps, freq='ME')
-            print(f"Best ETS Model: Trend={best_params['trend']}, Seasonal={best_params['seasonal']}, AIC={best_aic}")
+            forecast.index = pd.date_range(start=datetime.now(), periods=steps, freq="ME")
+            if apply_log:
+                forecast = np.exp(forecast) - 1
+            print(f"✅ Best ETS Model: Trend={best_params['trend']}, Seasonal={best_params['seasonal']}, AIC={best_aic}")
             return forecast
         else:
-            print("No valid ETS model found. Falling back to default.")
-            return pd.Series(
-                [stock_data.iloc[-1]] * steps,
-                index=pd.date_range(start=datetime.now(), periods=steps, freq='ME')
-            )
+            print("❌ No valid ETS model found. Using fallback.")
+            last_val = float(stock_data.iloc[-1]) if not stock_data.empty else 0
+            return pd.Series([last_val] * steps, index=pd.date_range(start=datetime.now(), periods=steps, freq="ME"))
 
     except Exception as e:
-        print(f"Error in ETS model: {e}")
-        return pd.Series(
-            [stock_data.iloc[-1]] * steps,
-            index=pd.date_range(start=datetime.now(), periods=steps, freq='ME')
-        )
+        print(f"❌ Error in ETS model: {e}")
+        last_val = float(stock_data.iloc[-1]) if not stock_data.empty else 0
+        return pd.Series([last_val] * steps, index=pd.date_range(start=datetime.now(), periods=steps, freq="ME"))
+
 
 
 # === 4. Forecast with Random Forest ===
