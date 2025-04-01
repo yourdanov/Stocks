@@ -163,6 +163,14 @@ Additional models can be implemented e.g., XGBoost, Prophet.
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks2.png">
 </picture>
 
+<div>
+<img src="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks3.png" width="500px"</img>
+</div>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/yourdanov/Python/blob/main/Stocks%20Forecast/stocks3.png">
+</picture>
+
 ---
 
 ## **Support**
